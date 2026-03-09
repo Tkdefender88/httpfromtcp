@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"strings"
 )
 
 func main() {
@@ -16,9 +17,14 @@ func main() {
 	defer msgFile.Close()
 
 	buf := make([]byte, 8)
+	line := ""
 	for {
 		n, err := msgFile.Read(buf)
 		if err != nil {
+			if line != "" {
+				fmt.Printf("read: %s\n", line)
+				line = ""
+			}
 			if errors.Is(err, io.EOF) {
 				break
 			}
@@ -26,6 +32,12 @@ func main() {
 			os.Exit(1)
 		}
 		str := string(buf[:n])
-		fmt.Printf("read: %s\n", str)
+		parts := strings.Split(str, "\n")
+		for _, part := range parts[:len(parts)-1] {
+			line += part
+			fmt.Printf("read: %s\n", line)
+			line = ""
+		}
+		line += parts[len(parts)-1]
 	}
 }
