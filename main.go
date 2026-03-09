@@ -14,30 +14,42 @@ func main() {
 		fmt.Println(err)
 		os.Exit(1)
 	}
-	defer msgFile.Close()
 
-	buf := make([]byte, 8)
-	line := ""
-	for {
-		n, err := msgFile.Read(buf)
-		if err != nil {
-			if line != "" {
-				fmt.Printf("read: %s\n", line)
-				line = ""
-			}
-			if errors.Is(err, io.EOF) {
+	lines := getLinesChannel(msgFile)
+	for line := range lines {
+		fmt.Printf("read: %s\n", line)
+	}
+}
+
+func getLinesChannel(r io.ReadCloser) <-chan string {
+	strChan := make(chan string)
+
+	go func() {
+		defer close(strChan)
+		buf := make([]byte, 8)
+		lineContents := ""
+		for {
+			n, err := r.Read(buf)
+			if err != nil {
+				if lineContents != "" {
+					strChan <- lineContents
+				}
+				if errors.Is(err, io.EOF) {
+					r.Close()
+					break
+				}
 				break
 			}
-			fmt.Fprintf(os.Stderr, "error reading: %s\n", err)
-			os.Exit(1)
+			str := string(buf[:n])
+			parts := strings.Split(str, "\n")
+			for _, part := range parts[:len(parts)-1] {
+				lineContents += part
+				strChan <- lineContents
+				lineContents = ""
+			}
+			lineContents += parts[len(parts)-1]
 		}
-		str := string(buf[:n])
-		parts := strings.Split(str, "\n")
-		for _, part := range parts[:len(parts)-1] {
-			line += part
-			fmt.Printf("read: %s\n", line)
-			line = ""
-		}
-		line += parts[len(parts)-1]
-	}
+	}()
+
+	return strChan
 }
