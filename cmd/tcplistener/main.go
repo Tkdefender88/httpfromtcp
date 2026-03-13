@@ -1,12 +1,11 @@
 package main
 
 import (
-	"errors"
 	"fmt"
-	"io"
 	"net"
 	"os"
-	"strings"
+
+	"github.com/Tkdefender88/httpfromtcp/internal/requests"
 )
 
 func main() {
@@ -26,44 +25,18 @@ func main() {
 		}
 		fmt.Println("connection accepted")
 
-		lines := getLinesChannel(conn)
-		for line := range lines {
-			fmt.Printf("read: %s\n", line)
+		req, err := requests.RequestFromReader(conn)
+		if err != nil {
+			fmt.Fprint(os.Stderr, fmt.Errorf("error reading request: %w", err))
 		}
+
+		fmt.Printf(
+			"Request line:\n- Method: %s\n- Target: %s\n- Version: %s\n",
+			req.RequestLine.Method,
+			req.RequestLine.RequestTarget,
+			req.RequestLine.HttpVersion,
+		)
 
 		fmt.Println("connection closed")
 	}
-}
-
-func getLinesChannel(r io.ReadCloser) <-chan string {
-	strChan := make(chan string)
-
-	go func() {
-		defer close(strChan)
-		buf := make([]byte, 8)
-		lineContents := ""
-		for {
-			n, err := r.Read(buf)
-			if err != nil {
-				if lineContents != "" {
-					strChan <- lineContents
-				}
-				if errors.Is(err, io.EOF) {
-					r.Close()
-					break
-				}
-				break
-			}
-			str := string(buf[:n])
-			parts := strings.Split(str, "\n")
-			for _, part := range parts[:len(parts)-1] {
-				lineContents += part
-				strChan <- lineContents
-				lineContents = ""
-			}
-			lineContents += parts[len(parts)-1]
-		}
-	}()
-
-	return strChan
 }

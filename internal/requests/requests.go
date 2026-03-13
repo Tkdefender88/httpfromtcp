@@ -64,6 +64,9 @@ func RequestFromReader(r io.Reader) (*Request, error) {
 		bytesRead, err := r.Read(buffer[readToIndex:])
 		if err != nil {
 			if errors.Is(err, io.EOF) {
+				if req.parseState != done {
+					return nil, fmt.Errorf("premature end of stream")
+				}
 				req.parseState = done
 				break
 			}
