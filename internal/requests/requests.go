@@ -1,14 +1,26 @@
 package requests
 
 import (
+	"bytes"
+	"errors"
 	"fmt"
 	"io"
 	"strings"
 	"unicode"
 )
 
+const bufferSize = 8
+
+type parseState int
+
+const (
+	initialized parseState = iota
+	done
+)
+
 type Request struct {
 	RequestLine RequestLine
+	parseState  parseState
 }
 
 type RequestLine struct {
@@ -17,46 +29,94 @@ type RequestLine struct {
 	Method        string
 }
 
-func RequestFromReader(r io.Reader) (Request, error) {
-	data, err := io.ReadAll(r)
-	if err != nil {
-		return Request{}, err
+func (r *Request) parse(data []byte) (int, error) {
+	switch r.parseState {
+	case initialized:
+		rl, n, err := parseRequestLine(data)
+		if err != nil {
+			return 0, err
+		}
+		if n == 0 {
+			return 0, nil
+		}
+		r.RequestLine = *rl
+		r.parseState = done
+		return n, nil
+	case done:
+		return 0, fmt.Errorf("trying to read data in a done state")
+	default:
+		return 0, fmt.Errorf("unknown state")
 	}
-
-	lines := strings.Split(string(data), "\r\n")
-	if len(lines) < 1 {
-		return Request{}, fmt.Errorf("invalid request")
-	}
-
-	rl, err := parseRequestLine(lines[0])
-	if err != nil {
-		return Request{}, err
-	}
-
-	return Request{
-		RequestLine: rl,
-	}, nil
 }
 
-func parseRequestLine(line string) (RequestLine, error) {
-	parts := strings.Split(line, " ")
+func RequestFromReader(r io.Reader) (*Request, error) {
+	buffer := make([]byte, bufferSize)
+	readToIndex := 0
+	req := &Request{parseState: initialized}
+
+	for req.parseState != done {
+		if readToIndex >= len(buffer) {
+			newBuf := make([]byte, len(buffer)*2)
+			copy(newBuf, buffer)
+			buffer = newBuf
+		}
+
+		bytesRead, err := r.Read(buffer[readToIndex:])
+		if err != nil {
+			if errors.Is(err, io.EOF) {
+				req.parseState = done
+				break
+			}
+			return nil, err
+		}
+
+		readToIndex += bytesRead
+
+		bytesParsed, err := req.parse(buffer[:readToIndex])
+		if err != nil {
+			return nil, err
+		}
+
+		copy(buffer, buffer[bytesParsed:])
+		readToIndex -= bytesParsed
+	}
+
+	return req, nil
+}
+
+func parseRequestLine(data []byte) (*RequestLine, int, error) {
+	idx := bytes.Index(data, []byte("\r\n"))
+	if idx == -1 {
+		return nil, 0, nil
+	}
+	requestLineText := string(data[:idx])
+	requestLine, err := requestLineFromString(requestLineText)
+	if err != nil {
+		return nil, 0, err
+	}
+
+	return requestLine, idx + 2, nil
+}
+
+func requestLineFromString(requestLine string) (*RequestLine, error) {
+	parts := strings.Split(requestLine, " ")
 	if len(parts) != 3 {
-		return RequestLine{}, fmt.Errorf("invalid request line")
+		return nil, fmt.Errorf("invalid request line")
 	}
 
 	method := parts[0]
 	if err := validateMethod(method); err != nil {
-		return RequestLine{}, err
+		return nil, err
 	}
 
 	target := parts[1]
 
 	httpVersion := parts[2]
 	if httpVersion != "HTTP/1.1" {
-		return RequestLine{}, fmt.Errorf("invalid http version")
+		return nil, fmt.Errorf("invalid http version")
 	}
 
-	return RequestLine{
+	return &RequestLine{
 		Method:        method,
 		RequestTarget: target,
 		HttpVersion:   "1.1",
