@@ -1,4 +1,4 @@
-package requests
+package request
 
 import (
 	"bytes"
@@ -7,6 +7,8 @@ import (
 	"io"
 	"strings"
 	"unicode"
+
+	"github.com/Tkdefender88/httpfromtcp/internal/headers"
 )
 
 const bufferSize = 8
@@ -14,13 +16,15 @@ const bufferSize = 8
 type parseState int
 
 const (
-	initialized parseState = iota
-	done
+	requestStateInitialized parseState = iota
+	requestStateParsingHeaders
+	requestStateDone
 )
 
 type Request struct {
 	RequestLine RequestLine
 	parseState  parseState
+	Headers     headers.Headers
 }
 
 type RequestLine struct {
@@ -29,32 +33,64 @@ type RequestLine struct {
 	Method        string
 }
 
-func (r *Request) parse(data []byte) (int, error) {
+func (r *Request) parseSingle(data []byte) (int, error) {
 	switch r.parseState {
-	case initialized:
+	case requestStateInitialized:
 		rl, n, err := parseRequestLine(data)
 		if err != nil {
-			return 0, err
+			return 0, fmt.Errorf("error parsing request line: %w", err)
 		}
 		if n == 0 {
 			return 0, nil
 		}
 		r.RequestLine = *rl
-		r.parseState = done
+		r.parseState = requestStateParsingHeaders
 		return n, nil
-	case done:
+	case requestStateParsingHeaders:
+		n, finished, err := r.Headers.Parse(data)
+		if err != nil {
+			return 0, fmt.Errorf("error parsing header: %w", err)
+		}
+		if finished {
+			r.parseState = requestStateDone
+		}
+		if n == 0 {
+			return 0, nil
+		}
+		return n, nil
+	case requestStateDone:
 		return 0, fmt.Errorf("trying to read data in a done state")
 	default:
 		return 0, fmt.Errorf("unknown state")
 	}
 }
 
+func (r *Request) parse(data []byte) (int, error) {
+	totalBytes := 0
+
+	for r.parseState != requestStateDone {
+		n, err := r.parseSingle(data[totalBytes:])
+		if err != nil {
+			return 0, err
+		}
+		if n == 0 {
+			break
+		}
+		totalBytes += n
+	}
+
+	return totalBytes, nil
+}
+
 func RequestFromReader(r io.Reader) (*Request, error) {
 	buffer := make([]byte, bufferSize)
 	readToIndex := 0
-	req := &Request{parseState: initialized}
+	req := &Request{
+		parseState: requestStateInitialized,
+		Headers:    make(headers.Headers),
+	}
 
-	for req.parseState != done {
+	for req.parseState != requestStateDone {
 		if readToIndex >= len(buffer) {
 			newBuf := make([]byte, len(buffer)*2)
 			copy(newBuf, buffer)
@@ -64,10 +100,10 @@ func RequestFromReader(r io.Reader) (*Request, error) {
 		bytesRead, err := r.Read(buffer[readToIndex:])
 		if err != nil {
 			if errors.Is(err, io.EOF) {
-				if req.parseState != done {
+				if req.parseState != requestStateDone {
 					return nil, fmt.Errorf("premature end of stream")
 				}
-				req.parseState = done
+				req.parseState = requestStateDone
 				break
 			}
 			return nil, err
@@ -77,7 +113,7 @@ func RequestFromReader(r io.Reader) (*Request, error) {
 
 		bytesParsed, err := req.parse(buffer[:readToIndex])
 		if err != nil {
-			return nil, err
+			return nil, fmt.Errorf("error parsing request: %w", err)
 		}
 
 		copy(buffer, buffer[bytesParsed:])

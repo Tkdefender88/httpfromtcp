@@ -1,4 +1,4 @@
-package requests
+package request
 
 import (
 	"io"
@@ -26,6 +26,46 @@ func (cr *chunkReader) Read(p []byte) (n int, err error) {
 	cr.pos += n
 
 	return n, nil
+}
+
+func TestRequestParser_ParseHeaders(t *testing.T) {
+	reader := &chunkReader{
+		data:            "GET / HTTP/1.1\r\nHost: localhost:42069\r\nUser-Agent: curl/7.81.0\r\nAccept: */*\r\n\r\n",
+		numBytesPerRead: 3,
+	}
+
+	r, err := RequestFromReader(reader)
+	require.NoError(t, err)
+	require.NotNil(t, r)
+
+	assert.Equal(t, "localhost:42069", r.Headers.Get("host"))
+	assert.Equal(t, "curl/7.81.0", r.Headers.Get("user-agent"))
+	assert.Equal(t, "*/*", r.Headers.Get("accept"))
+}
+
+func TestRequestParser_ParseHeaders_DuplicateHeaders(t *testing.T) {
+	reader := &chunkReader{
+		data:            "GET / HTTP/1.1\r\nHost: localhost:42069\r\nUser-Agent: curl/7.81.0\r\nAccept: */*\r\nHost: litfam420.com\r\n\r\n",
+		numBytesPerRead: 3,
+	}
+
+	r, err := RequestFromReader(reader)
+	require.NoError(t, err)
+	require.NotNil(t, r)
+
+	assert.Equal(t, "localhost:42069,litfam420.com", r.Headers.Get("host"))
+	assert.Equal(t, "curl/7.81.0", r.Headers.Get("user-agent"))
+	assert.Equal(t, "*/*", r.Headers.Get("accept"))
+}
+
+func TestRequestParser_ParseHeadersMalformed(t *testing.T) {
+	reader := &chunkReader{
+		data:            "GET / HTTP/1.1\r\nhost localhost:42069\r\n\r\n",
+		numBytesPerRead: 3,
+	}
+
+	_, err := RequestFromReader(reader)
+	require.Error(t, err)
 }
 
 func TestRequestLineParseTable(t *testing.T) {

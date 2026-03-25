@@ -5,7 +5,7 @@ import (
 	"net"
 	"os"
 
-	"github.com/Tkdefender88/httpfromtcp/internal/requests"
+	"github.com/Tkdefender88/httpfromtcp/internal/request"
 )
 
 func main() {
@@ -25,7 +25,7 @@ func main() {
 		}
 		fmt.Println("connection accepted")
 
-		req, err := requests.RequestFromReader(conn)
+		req, err := request.RequestFromReader(conn)
 		if err != nil {
 			fmt.Fprint(os.Stderr, fmt.Errorf("error reading request: %w", err))
 		}
@@ -36,6 +36,11 @@ func main() {
 			req.RequestLine.RequestTarget,
 			req.RequestLine.HttpVersion,
 		)
+
+		fmt.Println("Headers:")
+		for k, v := range req.Headers {
+			fmt.Printf("- %s: %s\n", k, v)
+		}
 
 		fmt.Println("connection closed")
 	}
