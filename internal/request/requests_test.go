@@ -28,6 +28,83 @@ func (cr *chunkReader) Read(p []byte) (n int, err error) {
 	return n, nil
 }
 
+func TestRequestParser_ParseBody_ValidBody(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name         string
+		reader       io.Reader
+		expectedBody string
+	}{
+		{
+			name: "Standard Body",
+			reader: &chunkReader{
+				data: "POST /submit HTTP/1.1\r\n" +
+					"Host: localhost:42069\r\n" +
+					"Content-Length: 13\r\n" +
+					"\r\n" +
+					"hello world!\n",
+				numBytesPerRead: 3,
+			},
+			expectedBody: "hello world!\n",
+		},
+		{
+			name: "Empty Body, Content Length reported 0",
+			reader: &chunkReader{
+				data: "POST /submit HTTP/1.1\r\n" +
+					"Host: localhost:42069\r\n" +
+					"Content-Length: 0\r\n" +
+					"\r\n",
+				numBytesPerRead: 3,
+			},
+			expectedBody: "",
+		},
+		{
+			name: "Empty Body, Content Length omitted",
+			reader: &chunkReader{
+				data: "POST /submit HTTP/1.1\r\n" +
+					"Host: localhost:42069\r\n" +
+					"\r\n",
+				numBytesPerRead: 3,
+			},
+			expectedBody: "",
+		},
+		{
+			name: "Body Exists, Content Length omitted",
+			reader: &chunkReader{
+				data: "POST /submit HTTP/1.1\r\n" +
+					"Host: localhost:42069\r\n" +
+					"\r\n" +
+					"hello world!\n",
+				numBytesPerRead: 3,
+			},
+			expectedBody: "",
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			r, err := RequestFromReader(tc.reader)
+			require.NoError(t, err)
+			require.NotNil(t, r)
+			assert.Equal(t, tc.expectedBody, string(r.Body), "Did not get the expected body in the request")
+		})
+	}
+}
+
+func TestRequestParser_ParseBody_BodyTooShort(t *testing.T) {
+	// Test: Body shorter than reported content length
+	reader := &chunkReader{
+		data: "POST /submit HTTP/1.1\r\n" +
+			"Host: localhost:42069\r\n" +
+			"Content-Length: 20\r\n" +
+			"\r\n" +
+			"partial content",
+		numBytesPerRead: 3,
+	}
+	_, err := RequestFromReader(reader)
+	require.Error(t, err)
+}
+
 func TestRequestParser_ParseHeaders(t *testing.T) {
 	reader := &chunkReader{
 		data:            "GET / HTTP/1.1\r\nHost: localhost:42069\r\nUser-Agent: curl/7.81.0\r\nAccept: */*\r\n\r\n",

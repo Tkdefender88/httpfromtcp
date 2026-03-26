@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"strconv"
 	"strings"
 	"unicode"
 
@@ -18,6 +19,7 @@ type parseState int
 const (
 	requestStateInitialized parseState = iota
 	requestStateParsingHeaders
+	requestStateParsingBody
 	requestStateDone
 )
 
@@ -25,6 +27,7 @@ type Request struct {
 	RequestLine RequestLine
 	parseState  parseState
 	Headers     headers.Headers
+	Body        []byte
 }
 
 type RequestLine struct {
@@ -52,12 +55,40 @@ func (r *Request) parseSingle(data []byte) (int, error) {
 			return 0, fmt.Errorf("error parsing header: %w", err)
 		}
 		if finished {
-			r.parseState = requestStateDone
+			r.parseState = requestStateParsingBody
 		}
 		if n == 0 {
 			return 0, nil
 		}
 		return n, nil
+	case requestStateParsingBody:
+		contentLength := r.Headers.Get("content-length")
+		if contentLength == "" {
+			r.parseState = requestStateDone
+			return len(data), nil
+		}
+
+		reportedLength, err := strconv.Atoi(contentLength)
+		if err != nil {
+			return 0, fmt.Errorf("invalid content length: %q, could not parse: %w", contentLength, err)
+		}
+
+		fmt.Println(string(data))
+		r.Body = append(r.Body, data...)
+
+		if len(r.Body) > reportedLength {
+			return 0, fmt.Errorf(
+				"reported content length is incorrect, body is %d, reported Length is %d",
+				len(r.Body),
+				reportedLength,
+			)
+		}
+
+		if len(r.Body) == reportedLength {
+			r.parseState = requestStateDone
+		}
+
+		return len(data), nil
 	case requestStateDone:
 		return 0, fmt.Errorf("trying to read data in a done state")
 	default:
@@ -97,27 +128,26 @@ func RequestFromReader(r io.Reader) (*Request, error) {
 			buffer = newBuf
 		}
 
-		bytesRead, err := r.Read(buffer[readToIndex:])
-		if err != nil {
-			if errors.Is(err, io.EOF) {
+		bytesRead, readErr := r.Read(buffer[readToIndex:])
+		readToIndex += bytesRead
+
+		bytesParsed, parseErr := req.parse(buffer[:readToIndex])
+		if parseErr != nil {
+			return nil, fmt.Errorf("error parsing request: %w", parseErr)
+		}
+		copy(buffer, buffer[bytesParsed:])
+		readToIndex -= bytesParsed
+
+		if readErr != nil {
+			if errors.Is(readErr, io.EOF) {
 				if req.parseState != requestStateDone {
 					return nil, fmt.Errorf("premature end of stream")
 				}
 				req.parseState = requestStateDone
 				break
 			}
-			return nil, err
+			return nil, readErr
 		}
-
-		readToIndex += bytesRead
-
-		bytesParsed, err := req.parse(buffer[:readToIndex])
-		if err != nil {
-			return nil, fmt.Errorf("error parsing request: %w", err)
-		}
-
-		copy(buffer, buffer[bytesParsed:])
-		readToIndex -= bytesParsed
 	}
 
 	return req, nil

@@ -35,7 +35,7 @@ func TestHeaderParse_ValidDone(t *testing.T) {
 	n, done, err := headers.Parse(data)
 	require.NoError(t, err, "expect no errors from valid header line")
 	require.NotNil(t, headers, "expect headers to be non nil")
-	assert.Equal(t, 0, n)
+	assert.Equal(t, 2, n)
 	assert.Equal(t, true, done, "parser should not be done")
 }
 
