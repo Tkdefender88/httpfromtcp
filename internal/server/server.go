@@ -4,14 +4,18 @@ import (
 	"fmt"
 	"net"
 	"sync/atomic"
+
+	"github.com/Tkdefender88/httpfromtcp/internal/request"
+	"github.com/Tkdefender88/httpfromtcp/internal/response"
 )
 
 type Server struct {
 	listener net.Listener
 	closed   atomic.Bool
+	handler  Handler
 }
 
-func Serve(port int) (*Server, error) {
+func Serve(port int, handler Handler) (*Server, error) {
 	addr := fmt.Sprintf(":%d", port)
 	ln, err := net.Listen("tcp", addr)
 	if err != nil {
@@ -21,6 +25,7 @@ func Serve(port int) (*Server, error) {
 	server := &Server{
 		listener: ln,
 		closed:   atomic.Bool{},
+		handler:  handler,
 	}
 
 	go server.listen()
@@ -45,12 +50,18 @@ func (s *Server) listen() {
 
 func (s *Server) handle(conn net.Conn) {
 	defer conn.Close()
-	response := "HTTP/1.1 200 OK\r\n" +
-		"Content-Type: text/plain\r\n" +
-		"Content-Length: 13\r\n" +
-		"\r\n" +
-		"Hello World!\n"
-	conn.Write([]byte(response))
+
+	rw := response.NewWriter(conn)
+	req, err := request.RequestFromReader(conn)
+	if err != nil {
+		body := []byte("Error occurred reading the request")
+		rw.WriteStatus(response.StatusBadRequest)
+		rw.WriteHeaders(response.SetDefaultHeaders(len(body)))
+		rw.WriteBody(body)
+		return
+	}
+
+	s.handler(rw, req)
 }
 
 func (s *Server) Close() error {
