@@ -7,8 +7,6 @@ import (
 )
 
 type Server struct {
-	Port int
-
 	listener net.Listener
 	closed   atomic.Bool
 }
@@ -21,7 +19,6 @@ func Serve(port int) (*Server, error) {
 	}
 
 	server := &Server{
-		Port:     port,
 		listener: ln,
 		closed:   atomic.Bool{},
 	}
@@ -34,11 +31,10 @@ func Serve(port int) (*Server, error) {
 func (s *Server) listen() {
 	for {
 		conn, err := s.listener.Accept()
-		if s.closed.Load() {
-			return
-		}
-
 		if err != nil {
+			if s.closed.Load() {
+				return
+			}
 			fmt.Printf("error accepting connnection %v\n", err)
 			continue
 		}
@@ -49,10 +45,18 @@ func (s *Server) listen() {
 
 func (s *Server) handle(conn net.Conn) {
 	defer conn.Close()
-	conn.Write([]byte("HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\n\r\nHello World!\n"))
+	response := "HTTP/1.1 200 OK\r\n" +
+		"Content-Type: text/plain\r\n" +
+		"Content-Length: 13\r\n" +
+		"\r\n" +
+		"Hello World!\n"
+	conn.Write([]byte(response))
 }
 
 func (s *Server) Close() error {
 	s.closed.Store(true)
-	return s.listener.Close()
+	if s.listener != nil {
+		return s.listener.Close()
+	}
+	return nil
 }
