@@ -1,11 +1,17 @@
 package main
 
 import (
+	"errors"
+	"fmt"
+	"io"
 	"log"
+	"net/http"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 
+	"github.com/Tkdefender88/httpfromtcp/internal/headers"
 	"github.com/Tkdefender88/httpfromtcp/internal/request"
 	"github.com/Tkdefender88/httpfromtcp/internal/response"
 	"github.com/Tkdefender88/httpfromtcp/internal/server"
@@ -27,7 +33,46 @@ func main() {
 	log.Println("Server gracefully stopped")
 }
 
+func handleProxy(w *response.Writer, req *request.Request) {
+	target := strings.TrimPrefix(req.RequestLine.RequestTarget, "/httpbin/")
+
+	resp, err := http.Get(fmt.Sprintf("https://httpbin.org/%s", target))
+	if err != nil {
+		fmt.Printf("error proxying request: %v\n", err)
+		return
+	}
+
+	h := headers.New()
+	h.Set("Transfer-Encoding", "chunked")
+	h.Set("Content-Type", resp.Header.Get("Content-Type"))
+
+	w.WriteStatus(response.StatusOK)
+	w.WriteHeaders(h)
+
+	buf := make([]byte, 1024)
+	for {
+		n, err := resp.Body.Read(buf)
+		if n > 0 {
+			w.WriteChunkedBody(buf[:n])
+		}
+		if err != nil {
+			if errors.Is(io.EOF, err) {
+				break
+			}
+			fmt.Printf("error reading response: %v", err)
+			break
+		}
+	}
+
+	w.WriteChunkedBodyDone()
+}
+
 func handlerFunc(w *response.Writer, req *request.Request) {
+	if strings.HasPrefix(req.RequestLine.RequestTarget, "/httpbin") {
+		handleProxy(w, req)
+		return
+	}
+
 	switch req.RequestLine.RequestTarget {
 	case "/yourproblem":
 		body := "<html>\n" +

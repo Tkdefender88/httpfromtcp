@@ -52,6 +52,14 @@ func (w *Writer) WriteBody(p []byte) error {
 	return nil
 }
 
+func (w *Writer) WriteChunkedBody(p []byte) (int, error) {
+	return fmt.Fprintf(w.w, "%X\r\n%s\r\n", len(p), p)
+}
+
+func (w *Writer) WriteChunkedBodyDone() (int, error) {
+	return fmt.Fprint(w.w, "0\r\n\r\n")
+}
+
 type StatusCode int
 
 const (
