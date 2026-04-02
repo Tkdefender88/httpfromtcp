@@ -38,9 +38,10 @@ func handleProxy(w *response.Writer, req *request.Request) {
 
 	resp, err := http.Get(fmt.Sprintf("https://httpbin.org/%s", target))
 	if err != nil {
-		fmt.Printf("error proxying request: %v\n", err)
+		handler500(w, req)
 		return
 	}
+	defer resp.Body.Close()
 
 	h := headers.New()
 	h.Set("Transfer-Encoding", "chunked")
@@ -75,27 +76,9 @@ func handlerFunc(w *response.Writer, req *request.Request) {
 
 	switch req.RequestLine.RequestTarget {
 	case "/yourproblem":
-		body := "<html>\n" +
-			"<head>\n" +
-			"<title>400 Bad Request</title>\n" +
-			"</head>\n" +
-			"<body>\n" +
-			"<h1>Bad Request</h1>\n" +
-			"<p>Your request honestly kinda sucked.</p>\n" +
-			"</body>\n" +
-			"</html>\n"
-		WriteHTML(w, response.StatusBadRequest, []byte(body))
+		handler400(w, req)
 	case "/myproblem":
-		body := "<html>\n" +
-			"<head>\n" +
-			"<title>500 Internal Server Error</title>\n" +
-			"</head>\n" +
-			"<body>\n" +
-			"<h1>Internal Server Error</h1>\n" +
-			"<p>Okay, you know what? This one is on me.</p>\n" +
-			"</body>\n" +
-			"</html>\n"
-		WriteHTML(w, response.StatusInternalServerError, []byte(body))
+		handler500(w, req)
 	default:
 		body := "<html>\n" +
 			"<head>\n" +
@@ -108,6 +91,32 @@ func handlerFunc(w *response.Writer, req *request.Request) {
 			"</html>\n"
 		WriteHTML(w, response.StatusOK, []byte(body))
 	}
+}
+
+func handler400(w *response.Writer, _ *request.Request) {
+	body := "<html>\n" +
+		"<head>\n" +
+		"<title>400 Bad Request</title>\n" +
+		"</head>\n" +
+		"<body>\n" +
+		"<h1>Bad Request</h1>\n" +
+		"<p>Your request honestly kinda sucked.</p>\n" +
+		"</body>\n" +
+		"</html>\n"
+	WriteHTML(w, response.StatusBadRequest, []byte(body))
+}
+
+func handler500(w *response.Writer, _ *request.Request) {
+	body := "<html>\n" +
+		"<head>\n" +
+		"<title>500 Internal Server Error</title>\n" +
+		"</head>\n" +
+		"<body>\n" +
+		"<h1>Internal Server Error</h1>\n" +
+		"<p>Okay, you know what? This one is on me.</p>\n" +
+		"</body>\n" +
+		"</html>\n"
+	WriteHTML(w, response.StatusInternalServerError, []byte(body))
 }
 
 func WriteHTML(w *response.Writer, statusCode response.StatusCode, body []byte) {
