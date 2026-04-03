@@ -57,7 +57,15 @@ func (w *Writer) WriteChunkedBody(p []byte) (int, error) {
 }
 
 func (w *Writer) WriteChunkedBodyDone() (int, error) {
-	return fmt.Fprint(w.w, "0\r\n\r\n")
+	return fmt.Fprint(w.w, "0\r\n")
+}
+
+func (w *Writer) WriteTrailers(h headers.Headers) error {
+	if w.state != writeBody {
+		return fmt.Errorf("Not in the correct state to write trailers")
+	}
+
+	return WriteHeaders(w.w, h)
 }
 
 type StatusCode int

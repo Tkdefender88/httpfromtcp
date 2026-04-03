@@ -1,6 +1,7 @@
 package main
 
 import (
+	"crypto/sha256"
 	"errors"
 	"fmt"
 	"io"
@@ -8,6 +9,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strconv"
 	"strings"
 	"syscall"
 
@@ -46,15 +48,19 @@ func handleProxy(w *response.Writer, req *request.Request) {
 	h := headers.New()
 	h.Set("Transfer-Encoding", "chunked")
 	h.Set("Content-Type", resp.Header.Get("Content-Type"))
+	h.Set("Trailer", "X-Content-SHA256")
+	h.Set("Trailer", "X-Content-Length")
 
 	w.WriteStatus(response.StatusOK)
 	w.WriteHeaders(h)
 
+	responseBody := make([]byte, 0, 1024)
 	buf := make([]byte, 1024)
 	for {
 		n, err := resp.Body.Read(buf)
 		if n > 0 {
 			w.WriteChunkedBody(buf[:n])
+			responseBody = append(responseBody, buf[:n]...)
 		}
 		if err != nil {
 			if errors.Is(io.EOF, err) {
@@ -65,7 +71,29 @@ func handleProxy(w *response.Writer, req *request.Request) {
 		}
 	}
 
+	hash := sha256.Sum256(responseBody)
 	w.WriteChunkedBodyDone()
+	trailers := headers.New()
+	trailers.Set("X-Content-SHA256", fmt.Sprintf("%x", hash[:]))
+	trailers.Set("X-Content-Length", strconv.Itoa(len(responseBody)))
+	w.WriteTrailers(trailers)
+}
+
+func handlerVideo(w *response.Writer, req *request.Request) {
+	h := headers.New()
+	h.Set("Content-Type", "video/mp4")
+
+	data, err := os.ReadFile("./assets/vim.mp4")
+	if err != nil {
+		fmt.Printf("error occurred: %v\n", err)
+		handler500(w, req)
+		return
+	}
+	h.Set("Content-Length", strconv.Itoa(len(data)))
+
+	w.WriteStatus(response.StatusOK)
+	w.WriteHeaders(h)
+	w.WriteBody(data)
 }
 
 func handlerFunc(w *response.Writer, req *request.Request) {
@@ -75,6 +103,8 @@ func handlerFunc(w *response.Writer, req *request.Request) {
 	}
 
 	switch req.RequestLine.RequestTarget {
+	case "/video":
+		handlerVideo(w, req)
 	case "/yourproblem":
 		handler400(w, req)
 	case "/myproblem":
